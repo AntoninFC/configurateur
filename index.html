@@ -7,7 +7,7 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
-    body { font-family: 'Inter', system-ui, sans-serif; }
+    body { font-family: 'Inter', system-ui, sans-serif; margin:0; overflow:hidden; }
     .radar-area { transition: d 0.6s cubic-bezier(.25,.8,.25,1); }
     .score-bar { transition: width 0.5s cubic-bezier(.25,.8,.25,1); }
     .part-btn { transition: all 0.2s ease; }
@@ -16,20 +16,14 @@
     .turntable-frame.active { opacity:1; }
   </style>
 </head>
-<body class="bg-[#f2f2f2] min-h-screen">
+<body class="bg-[#f2f2f2]">
 
-<div id="app"></div>
+<div id="app" class="h-screen flex flex-col"></div>
 
 <script>
-// ═══════════════════════════════════════════
-// CONFIG — chemin vers les assets
-// ═══════════════════════════════════════════
 const ASSETS_BASE = './configurateur-assets';
 const FRAMES_COUNT = 24;
 
-// ═══════════════════════════════════════════
-// DATA — vrais produits depuis les ZIP
-// ═══════════════════════════════════════════
 const PARTS = {
   aile_avant: [
     { id: 'silk-v2-850', name: 'Silk V2 850', folder: 'silk-v2-850', prefix: 'silk-v2-850' },
@@ -49,16 +43,15 @@ const PARTS = {
 const SCORE_AXES = [
   { key: 'carving_access', label: 'Carving Access' },
   { key: 'carving', label: 'Carving' },
-  { key: 'downwind_access', label: 'Downwind Access' },
+  { key: 'downwind_access', label: 'DW Access' },
   { key: 'downwind', label: 'Downwind' },
-  { key: 'freeride_access', label: 'Freeride Access' },
+  { key: 'freeride_access', label: 'FR Access' },
   { key: 'freeride', label: 'Freeride' },
   { key: 'freestyle', label: 'Freestyle' },
   { key: 'freerace', label: 'Freerace' },
   { key: 'wave', label: 'Wave' },
 ];
 
-// Combinaisons valides (mock scores — à remplacer par le vrai CSV)
 const SETUPS = [
   { aile_avant:'silk-v2-850', stabilisateur:'ucarve-130', fuselage:'fuselage-evo', mat:'uhm-85',
     scores:{carving_access:85,carving:78,downwind_access:45,downwind:30,freeride_access:90,freeride:82,freestyle:65,freerace:50,wave:60}},
@@ -68,21 +61,13 @@ const SETUPS = [
 
 const TYPE_LABELS = { aile_avant:'Aile avant', stabilisateur:'Stabilisateur', fuselage:'Fuselage', mat:'Mât' };
 const PART_TYPES = ['aile_avant','stabilisateur','fuselage','mat'];
-
-// Z-order pour le layering (back to front)
 const LAYER_ORDER = ['mat','fuselage','aile_avant','stabilisateur'];
 
-// ═══════════════════════════════════════════
-// IMAGE PATH HELPER
-// ═══════════════════════════════════════════
 function getFramePath(part, frameNum) {
   const num = String(frameNum).padStart(4, '0');
   return `${ASSETS_BASE}/${part.folder}/${part.prefix}_${num}.webp`;
 }
 
-// ═══════════════════════════════════════════
-// PRELOAD IMAGES
-// ═══════════════════════════════════════════
 const imageCache = {};
 function preloadPart(part) {
   if (imageCache[part.id]) return;
@@ -93,12 +78,8 @@ function preloadPart(part) {
     imageCache[part.id].push(img);
   }
 }
-// Preload all parts on page load
 Object.values(PARTS).flat().forEach(preloadPart);
 
-// ═══════════════════════════════════════════
-// LOGIC
-// ═══════════════════════════════════════════
 function findSetup(sel) {
   if (!sel.aile_avant || !sel.stabilisateur || !sel.fuselage || !sel.mat) return null;
   return SETUPS.find(s =>
@@ -117,70 +98,59 @@ function getCompatibleParts(partType, sel) {
   return [...new Set(matching.map(s => s[partType]))];
 }
 
-// ═══════════════════════════════════════════
-// RADAR CHART (SVG)
-// ═══════════════════════════════════════════
-const RADAR_SIZE = 360;
-const RADAR_CENTER = RADAR_SIZE / 2;
-const RADAR_RADIUS = 130;
-const LABEL_RADIUS = RADAR_RADIUS + 32;
+// ── RADAR CHART
+const RS = 300, RC = RS/2, RR = 105, LR = RR + 28;
 const RINGS = [20,40,60,80,100];
 
-function polar(angle, radius) {
-  const rad = ((angle - 90) * Math.PI) / 180;
-  return { x: RADAR_CENTER + radius * Math.cos(rad), y: RADAR_CENTER + radius * Math.sin(rad) };
+function polar(a, r) {
+  const rad = ((a-90)*Math.PI)/180;
+  return { x: RC+r*Math.cos(rad), y: RC+r*Math.sin(rad) };
 }
 
 function buildRadarPath(scores) {
-  const step = 360 / SCORE_AXES.length;
-  return SCORE_AXES.map((axis, i) => {
-    const val = (scores && scores[axis.key]) || 0;
-    const r = (val / 100) * RADAR_RADIUS;
-    const {x, y} = polar(i * step, r);
+  const step = 360/SCORE_AXES.length;
+  return SCORE_AXES.map((axis,i) => {
+    const val = (scores&&scores[axis.key])||0;
+    const r = (val/100)*RR;
+    const {x,y} = polar(i*step, r);
     return `${i===0?'M':'L'}${x.toFixed(2)},${y.toFixed(2)}`;
-  }).join(' ') + ' Z';
+  }).join(' ')+'Z';
 }
 
 function renderRadarSVG(scores) {
-  const step = 360 / SCORE_AXES.length;
-  let svg = `<svg viewBox="0 0 ${RADAR_SIZE} ${RADAR_SIZE}" class="w-full max-w-[340px] mx-auto">`;
+  const step = 360/SCORE_AXES.length;
+  let svg = `<svg viewBox="0 0 ${RS} ${RS}" class="w-full max-w-[280px] mx-auto">`;
   RINGS.forEach(val => {
-    const r = (val / 100) * RADAR_RADIUS;
-    svg += `<circle cx="${RADAR_CENTER}" cy="${RADAR_CENTER}" r="${r}" fill="none" stroke="#e5e5e5" stroke-width="0.8"/>`;
+    const r=(val/100)*RR;
+    svg += `<circle cx="${RC}" cy="${RC}" r="${r}" fill="none" stroke="#e5e5e5" stroke-width="0.7"/>`;
   });
-  SCORE_AXES.forEach((_, i) => {
-    const {x, y} = polar(i * step, RADAR_RADIUS);
-    svg += `<line x1="${RADAR_CENTER}" y1="${RADAR_CENTER}" x2="${x}" y2="${y}" stroke="#e5e5e5" stroke-width="0.8"/>`;
+  SCORE_AXES.forEach((_,i) => {
+    const {x,y} = polar(i*step, RR);
+    svg += `<line x1="${RC}" y1="${RC}" x2="${x}" y2="${y}" stroke="#e5e5e5" stroke-width="0.7"/>`;
   });
-  svg += `<path class="radar-area" d="${buildRadarPath(scores)}" fill="rgba(17,17,17,0.10)" stroke="#111" stroke-width="2" stroke-linejoin="round"/>`;
-  SCORE_AXES.forEach((axis, i) => {
-    const val = (scores && scores[axis.key]) || 0;
+  svg += `<path class="radar-area" d="${buildRadarPath(scores)}" fill="rgba(17,17,17,0.10)" stroke="#111" stroke-width="1.8" stroke-linejoin="round"/>`;
+  SCORE_AXES.forEach((axis,i) => {
+    const val = (scores&&scores[axis.key])||0;
     if (scores) {
-      const r = (val / 100) * RADAR_RADIUS;
-      const {x, y} = polar(i * step, r);
-      svg += `<circle cx="${x}" cy="${y}" r="3.5" fill="#111"/>`;
+      const r=(val/100)*RR;
+      const {x,y} = polar(i*step, r);
+      svg += `<circle cx="${x}" cy="${y}" r="3" fill="#111"/>`;
     }
-    const lbl = polar(i * step, LABEL_RADIUS);
-    svg += `<text x="${lbl.x}" y="${lbl.y}" text-anchor="middle" dominant-baseline="central" fill="#888" style="font-size:9.5px;font-weight:500">${axis.label}</text>`;
+    const lbl = polar(i*step, LR);
+    svg += `<text x="${lbl.x}" y="${lbl.y}" text-anchor="middle" dominant-baseline="central" fill="#888" style="font-size:9px;font-weight:500">${axis.label}</text>`;
     if (scores) {
-      svg += `<text x="${lbl.x}" y="${lbl.y + 13}" text-anchor="middle" dominant-baseline="central" fill="#111" style="font-size:10.5px;font-weight:700">${val}</text>`;
+      svg += `<text x="${lbl.x}" y="${lbl.y+12}" text-anchor="middle" dominant-baseline="central" fill="#111" style="font-size:10px;font-weight:700">${val}</text>`;
     }
   });
   svg += '</svg>';
   return svg;
 }
 
-// ═══════════════════════════════════════════
-// TURNTABLE VIEWER — real layered images
-// ═══════════════════════════════════════════
-let currentFrame = 1;
-let isDragging = false;
-let dragStartX = 0;
+// ── TURNTABLE
+let currentFrame = 1, isDragging = false, dragStartX = 0;
 
 function renderTurntable(label) {
   const hasAnyPart = PART_TYPES.some(t => selection[t]);
-
-  // Build layered images for each selected part
   let layersHTML = '';
   if (hasAnyPart) {
     LAYER_ORDER.forEach(type => {
@@ -188,221 +158,167 @@ function renderTurntable(label) {
       if (!partId) return;
       const part = PARTS[type].find(p => p.id === partId);
       if (!part) return;
-
-      // Render all 24 frames, only the current one is visible
       for (let i = 1; i <= FRAMES_COUNT; i++) {
         const isActive = i === currentFrame;
-        layersHTML += `<img src="${getFramePath(part, i)}" class="turntable-layer turntable-frame ${isActive ? 'active' : ''}" data-type="${type}" data-frame="${i}" alt="${part.name} frame ${i}" draggable="false" />`;
+        layersHTML += `<img src="${getFramePath(part, i)}" class="turntable-layer turntable-frame ${isActive?'active':''}" data-type="${type}" data-frame="${i}" alt="${part.name}" draggable="false"/>`;
       }
     });
   }
 
-  // Placeholder shown only when nothing is selected
   const placeholderHTML = !hasAnyPart ? `
-    <div class="relative z-10 flex flex-col items-center justify-center gap-2">
-      <svg viewBox="0 0 440 240" class="w-[65%] max-w-[480px] opacity-[0.15]">
+    <div class="relative z-10 flex flex-col items-center justify-center gap-1">
+      <svg viewBox="0 0 440 240" class="w-[55%] max-w-[400px] opacity-[0.12]">
         <rect x="215" y="8" width="10" height="200" rx="4" fill="#111"/>
         <rect x="100" y="105" width="240" height="8" rx="4" fill="#111"/>
         <ellipse cx="220" cy="100" rx="170" ry="16" fill="#111" opacity="0.7"/>
         <ellipse cx="220" cy="208" rx="75" ry="11" fill="#111" opacity="0.6"/>
       </svg>
-      <p class="text-xs text-gray-400 tracking-wide">Sélectionnez des composants pour visualiser votre foil</p>
+      <p class="text-[11px] text-gray-400">Sélectionnez des composants</p>
     </div>` : '';
 
   return `
-    <div class="relative w-full aspect-[16/10] flex items-center justify-center select-none overflow-hidden cursor-grab active:cursor-grabbing bg-gradient-to-b from-white to-gray-50/50" id="turntable"
-         onpointerdown="onTurntableDown(event)"
-         onpointermove="onTurntableMove(event)"
-         onpointerup="onTurntableUp(event)"
-         onpointerleave="onTurntableUp(event)">
-
-      <!-- Watermark -->
+    <div class="relative w-full h-full flex items-center justify-center select-none overflow-hidden cursor-grab active:cursor-grabbing bg-gradient-to-b from-white to-gray-50/30" id="turntable"
+         onpointerdown="onTurntableDown(event)" onpointermove="onTurntableMove(event)" onpointerup="onTurntableUp(event)" onpointerleave="onTurntableUp(event)">
       <span class="absolute inset-0 flex items-center justify-center pointer-events-none z-0"
-            style="color:rgba(0,0,0,0.03);font-size:clamp(1.8rem,6vw,5rem);font-weight:900;letter-spacing:-0.02em;font-style:italic;white-space:nowrap">
+            style="color:rgba(0,0,0,0.025);font-size:clamp(1.5rem,5vw,4rem);font-weight:900;letter-spacing:-0.02em;font-style:italic;white-space:nowrap">
         ${label || 'Build Your Foil'}
       </span>
-
       ${placeholderHTML}
       ${layersHTML}
-
-      <!-- 360° indicator -->
       ${hasAnyPart ? `
-      <div class="absolute bottom-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-1.5 text-[11px] text-gray-400 tracking-wide bg-white/60 backdrop-blur-sm px-3 py-1 rounded-full">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="opacity-50">
-          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-          <circle cx="12" cy="12" r="3"/>
-        </svg>
-        Glisser pour pivoter · 360°
+      <div class="absolute bottom-3 left-1/2 -translate-x-1/2 z-30 flex items-center gap-1.5 text-[10px] text-gray-400 bg-white/60 backdrop-blur-sm px-2.5 py-0.5 rounded-full">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="opacity-50"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+        360°
       </div>` : ''}
     </div>`;
 }
 
-function onTurntableDown(e) {
-  isDragging = true;
-  dragStartX = e.clientX;
-  e.target.closest('#turntable')?.setPointerCapture(e.pointerId);
-}
-
+function onTurntableDown(e) { isDragging=true; dragStartX=e.clientX; e.target.closest('#turntable')?.setPointerCapture(e.pointerId); }
 function onTurntableMove(e) {
   if (!isDragging) return;
   const dx = e.clientX - dragStartX;
   if (Math.abs(dx) > 12) {
-    const direction = dx > 0 ? 1 : -1;
-    currentFrame = ((currentFrame - 1 + direction + FRAMES_COUNT) % FRAMES_COUNT) + 1;
+    currentFrame = ((currentFrame-1+(dx>0?1:-1)+FRAMES_COUNT)%FRAMES_COUNT)+1;
     dragStartX = e.clientX;
-    // Update visible frames without full re-render
     document.querySelectorAll('.turntable-frame').forEach(img => {
-      const frame = parseInt(img.dataset.frame);
-      img.classList.toggle('active', frame === currentFrame);
+      img.classList.toggle('active', parseInt(img.dataset.frame)===currentFrame);
     });
   }
 }
+function onTurntableUp() { isDragging=false; }
 
-function onTurntableUp(e) {
-  isDragging = false;
-}
-
-// ═══════════════════════════════════════════
-// RENDER
-// ═══════════════════════════════════════════
+// ── STATE & RENDER
 let selection = { aile_avant:null, stabilisateur:null, fuselage:null, mat:null };
 
 function getSetupLabel() {
   const names = [];
   PART_TYPES.forEach(type => {
-    if (selection[type]) {
-      const p = PARTS[type].find(x => x.id === selection[type]);
-      if (p) names.push(p.name);
-    }
+    if (selection[type]) { const p=PARTS[type].find(x=>x.id===selection[type]); if(p) names.push(p.name); }
   });
   return names.join(' · ') || '';
 }
 
-function handleSelect(type, id) {
-  selection[type] = selection[type] === id ? null : id;
-  currentFrame = 1; // reset rotation on part change
-  render();
-}
-
-function handleReset() {
-  selection = { aile_avant:null, stabilisateur:null, fuselage:null, mat:null };
-  currentFrame = 1;
-  render();
-}
+function handleSelect(type, id) { selection[type]=selection[type]===id?null:id; currentFrame=1; render(); }
+function handleReset() { selection={aile_avant:null,stabilisateur:null,fuselage:null,mat:null}; currentFrame=1; render(); }
 
 function renderPartSelector(type) {
-  const parts = PARTS[type];
-  const label = TYPE_LABELS[type];
-  const compat = getCompatibleParts(type, selection);
+  const parts=PARTS[type], label=TYPE_LABELS[type], compat=getCompatibleParts(type,selection);
   const icons = {
-    aile_avant: '<svg viewBox="0 0 40 20" class="w-8 h-4 opacity-30"><ellipse cx="20" cy="10" rx="19" ry="7" fill="currentColor"/></svg>',
-    stabilisateur: '<svg viewBox="0 0 40 20" class="w-7 h-3.5 opacity-30"><ellipse cx="20" cy="10" rx="14" ry="5" fill="currentColor"/></svg>',
-    fuselage: '<svg viewBox="0 0 40 10" class="w-8 h-2.5 opacity-30"><rect x="2" y="2" width="36" height="6" rx="3" fill="currentColor"/></svg>',
-    mat: '<svg viewBox="0 0 10 40" class="w-2.5 h-6 opacity-30"><rect x="2" y="2" width="6" height="36" rx="3" fill="currentColor"/></svg>',
+    aile_avant:'<svg viewBox="0 0 40 20" class="w-6 h-3 opacity-30"><ellipse cx="20" cy="10" rx="19" ry="7" fill="currentColor"/></svg>',
+    stabilisateur:'<svg viewBox="0 0 40 20" class="w-5 h-3 opacity-30"><ellipse cx="20" cy="10" rx="14" ry="5" fill="currentColor"/></svg>',
+    fuselage:'<svg viewBox="0 0 40 10" class="w-6 h-2 opacity-30"><rect x="2" y="2" width="36" height="6" rx="3" fill="currentColor"/></svg>',
+    mat:'<svg viewBox="0 0 10 40" class="w-2 h-5 opacity-30"><rect x="2" y="2" width="6" height="36" rx="3" fill="currentColor"/></svg>',
   };
-
-  let html = `<div class="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">`;
-  html += `<div class="flex items-center gap-2 mb-4">${icons[type]}<h3 class="text-xs font-semibold text-gray-900 uppercase tracking-wider">${label}</h3></div>`;
-  html += `<div class="flex flex-col gap-1.5">`;
-
+  let html = `<div class="bg-white rounded-xl p-3 shadow-sm border border-gray-100">`;
+  html += `<div class="flex items-center gap-1.5 mb-2">${icons[type]}<h3 class="text-[10px] font-semibold text-gray-900 uppercase tracking-wider">${label}</h3></div>`;
+  html += `<div class="flex flex-col gap-1">`;
   parts.forEach(part => {
-    const isSel = selection[type] === part.id;
-    const isOk = compat.includes(part.id);
-    const cls = isSel
-      ? 'bg-gray-900 text-white shadow-md'
-      : isOk
-        ? 'bg-gray-50 text-gray-900 hover:bg-gray-100'
-        : 'bg-gray-50/60 text-gray-300 cursor-not-allowed';
-    const dotCls = isSel ? 'bg-white' : isOk ? 'bg-gray-300' : 'bg-gray-200';
-    html += `<button onclick="${isOk ? `handleSelect('${type}','${part.id}')` : ''}" ${!isOk?'disabled':''} class="part-btn flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-left ${cls}">`;
-    html += `<span class="w-2 h-2 rounded-full flex-shrink-0 ${dotCls}"></span>`;
-    html += `<span class="text-sm font-medium">${part.name}</span>`;
-    if (!isOk) html += `<span class="ml-auto text-[10px] uppercase tracking-wider opacity-50">N/A</span>`;
+    const isSel=selection[type]===part.id, isOk=compat.includes(part.id);
+    const cls = isSel?'bg-gray-900 text-white shadow-md':isOk?'bg-gray-50 text-gray-900 hover:bg-gray-100':'bg-gray-50/60 text-gray-300 cursor-not-allowed';
+    const dotCls = isSel?'bg-white':isOk?'bg-gray-300':'bg-gray-200';
+    html += `<button onclick="${isOk?`handleSelect('${type}','${part.id}')`:''}" ${!isOk?'disabled':''} class="part-btn flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-left ${cls}">`;
+    html += `<span class="w-1.5 h-1.5 rounded-full flex-shrink-0 ${dotCls}"></span>`;
+    html += `<span class="text-xs font-medium">${part.name}</span>`;
+    if (!isOk) html += `<span class="ml-auto text-[9px] uppercase tracking-wider opacity-50">N/A</span>`;
     html += `</button>`;
   });
-
   html += `</div></div>`;
   return html;
 }
 
 function renderScoreBars(scores) {
   if (!scores) return '';
-  return `<div class="mt-5 space-y-2.5">${SCORE_AXES.map(axis => `
-    <div class="flex items-center gap-2.5">
-      <span class="text-[11px] text-gray-500 w-[105px] text-right truncate leading-tight">${axis.label}</span>
-      <div class="flex-1 h-[6px] bg-gray-100 rounded-full overflow-hidden">
+  return `<div class="space-y-1.5">${SCORE_AXES.map(axis => `
+    <div class="flex items-center gap-2">
+      <span class="text-[10px] text-gray-500 w-[80px] text-right truncate">${axis.label}</span>
+      <div class="flex-1 h-[5px] bg-gray-100 rounded-full overflow-hidden">
         <div class="score-bar h-full bg-gray-900 rounded-full" style="width:${scores[axis.key]}%"></div>
       </div>
-      <span class="text-[11px] font-bold text-gray-900 w-7 text-right tabular-nums">${scores[axis.key]}</span>
+      <span class="text-[10px] font-bold text-gray-900 w-6 text-right tabular-nums">${scores[axis.key]}</span>
     </div>
   `).join('')}</div>`;
 }
 
 function render() {
   const setup = findSetup(selection);
-  const selCount = PART_TYPES.filter(t => selection[t]).length;
-  const isComplete = selCount === 4;
+  const selCount = PART_TYPES.filter(t=>selection[t]).length;
+  const isComplete = selCount===4;
   const isIncompat = isComplete && !setup;
   const label = getSetupLabel();
 
   let html = '';
 
-  // ── Header
-  html += `<div class="max-w-7xl mx-auto px-4 sm:px-6 pt-8 pb-4">
-    <div class="flex items-center justify-between">
-      <div>
-        <p class="text-[11px] uppercase tracking-[0.15em] text-gray-400 font-medium">Configurateur</p>
-        <h1 class="text-2xl sm:text-3xl font-bold text-gray-900 mt-0.5">Foil Complet</h1>
-      </div>
-      ${selCount > 0 ? `<button onclick="handleReset()" class="text-[11px] uppercase tracking-wider text-gray-400 hover:text-gray-600 font-medium transition-colors">Réinitialiser</button>` : ''}
+  // ── HEADER
+  html += `<div class="flex-shrink-0 px-5 pt-4 pb-2 flex items-center justify-between">
+    <div>
+      <p class="text-[10px] uppercase tracking-[0.15em] text-gray-400 font-medium">Configurateur</p>
+      <h1 class="text-xl font-bold text-gray-900">Foil Complet</h1>
     </div>
+    ${selCount>0?`<button onclick="handleReset()" class="text-[10px] uppercase tracking-wider text-gray-400 hover:text-gray-600 font-medium">Réinitialiser</button>`:''}
   </div>`;
 
-  // ── Viewer
-  html += `<div class="max-w-7xl mx-auto px-4 sm:px-6">
-    <div class="bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden">
-      ${renderTurntable(label)}
-    </div>
+  // ── MAIN CONTENT: viewer left + right panel
+  html += `<div class="flex-1 min-h-0 flex gap-4 px-5 pb-4">`;
+
+  // LEFT: Turntable viewer
+  html += `<div class="flex-1 min-w-0 bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+    ${renderTurntable(label)}
   </div>`;
 
-  // ── Radar + selectors
-  html += `<div class="max-w-7xl mx-auto px-4 sm:px-6 mt-6">
-    <div class="flex flex-col lg:flex-row gap-6 items-start">`;
+  // RIGHT: Radar + selectors
+  html += `<div class="w-[340px] flex-shrink-0 flex flex-col gap-3 min-h-0 overflow-auto">`;
 
-  // Radar panel
-  html += `<div class="w-full lg:w-[380px] flex-shrink-0 bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
-    <h2 class="text-xs font-semibold text-gray-900 uppercase tracking-wider mb-3">Profil de ride</h2>
+  // Radar
+  html += `<div class="bg-white rounded-xl shadow-sm border border-gray-100 p-4 flex-shrink-0">
     <div class="relative">
       ${renderRadarSVG(setup ? setup.scores : null)}
       ${!setup ? `<div class="absolute inset-0 flex items-center justify-center">
-        <p class="text-sm text-gray-400 text-center px-4 py-2 bg-white/80 backdrop-blur-sm rounded-lg">
-          ${isIncompat ? "Combinaison non disponible" : "Sélectionnez vos 4 composants"}
+        <p class="text-xs text-gray-400 text-center px-3 py-1.5 bg-white/80 backdrop-blur-sm rounded-lg">
+          ${isIncompat?"Combinaison non disponible":"Sélectionnez vos 4 composants"}
         </p>
       </div>` : ''}
     </div>
     ${renderScoreBars(setup ? setup.scores : null)}
   </div>`;
 
-  // Selectors grid
-  html += `<div class="flex-1 grid grid-cols-2 lg:grid-cols-4 gap-4">`;
+  // Selectors 2x2 grid
+  html += `<div class="grid grid-cols-2 gap-3 flex-shrink-0">`;
   PART_TYPES.forEach(type => { html += renderPartSelector(type); });
   html += `</div>`;
 
-  html += `</div></div>`;
-
-  // ── Incompatible warning
+  // Incompatible warning
   if (isIncompat) {
-    html += `<div class="max-w-7xl mx-auto px-4 sm:px-6 mt-4">
-      <div class="bg-amber-50 border border-amber-200 rounded-xl px-5 py-3 flex items-center gap-3">
-        <svg width="20" height="20" viewBox="0 0 20 20" fill="none" class="flex-shrink-0">
-          <path d="M10 6v4m0 4h.01M18 10a8 8 0 11-16 0 8 8 0 0116 0z" stroke="#d97706" stroke-width="1.5" stroke-linecap="round"/>
-        </svg>
-        <p class="text-sm text-amber-800">Cette combinaison n'est pas disponible. Essayez de changer une pièce.</p>
-      </div>
+    html += `<div class="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 flex items-center gap-2 flex-shrink-0">
+      <svg width="16" height="16" viewBox="0 0 20 20" fill="none" class="flex-shrink-0">
+        <path d="M10 6v4m0 4h.01M18 10a8 8 0 11-16 0 8 8 0 0116 0z" stroke="#d97706" stroke-width="1.5" stroke-linecap="round"/>
+      </svg>
+      <p class="text-xs text-amber-800">Combinaison non disponible.</p>
     </div>`;
   }
 
-  html += `<div class="h-16"></div>`;
+  html += `</div>`; // end right panel
+  html += `</div>`; // end main content
+
   document.getElementById('app').innerHTML = html;
 }
 
