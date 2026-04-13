@@ -19,6 +19,8 @@
     .radar-area { transition: d 0.6s cubic-bezier(.25,.8,.25,1); }
     .score-bar { transition: width 0.5s cubic-bezier(.25,.8,.25,1); }
     .part-btn { transition: all 0.2s ease; }
+    @keyframes fadeSlideIn { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:translateY(0); } }
+    .anim-enter { animation: fadeSlideIn 0.35s ease-out both; }
   </style>
 </head>
 <body class="bg-[#f2f2f2]">
@@ -82,7 +84,17 @@ const loader = new GLTFLoader();
 
 function initThree(container) {
   scene = new THREE.Scene();
-  scene.background = new THREE.Color(0xf8f8f8);
+  // Gradient background: white top → light blue-grey bottom
+  const canvas = document.createElement('canvas');
+  canvas.width = 2; canvas.height = 256;
+  const ctx = canvas.getContext('2d');
+  const grad = ctx.createLinearGradient(0, 0, 0, 256);
+  grad.addColorStop(0, '#ffffff');
+  grad.addColorStop(1, '#dce8f0');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 2, 256);
+  const bgTexture = new THREE.CanvasTexture(canvas);
+  scene.background = bgTexture;
 
   // Camera
   camera = new THREE.PerspectiveCamera(35, container.clientWidth / container.clientHeight, 0.01, 100);
@@ -231,13 +243,14 @@ function renderRadarSVG(scores){
   let svg=`<svg viewBox="0 0 ${RS} ${RS}" class="w-full max-w-[280px] mx-auto">`;
   RINGS.forEach(val=>{const r=(val/100)*RR;svg+=`<circle cx="${RC}" cy="${RC}" r="${r}" fill="none" stroke="#e5e5e5" stroke-width="0.7"/>`;});
   SCORE_AXES.forEach((_,i)=>{const{x,y}=polar(i*step,RR);svg+=`<line x1="${RC}" y1="${RC}" x2="${x}" y2="${y}" stroke="#e5e5e5" stroke-width="0.7"/>`;});
-  svg+=`<path class="radar-area" d="${buildRadarPath(scores)}" fill="rgba(17,17,17,0.10)" stroke="#111" stroke-width="1.8" stroke-linejoin="round"/>`;
+  svg+=`<defs><linearGradient id="radarGrad" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#0891b2" stop-opacity="0.25"/><stop offset="100%" stop-color="#06b6d4" stop-opacity="0.08"/></linearGradient></defs>`;
+  svg+=`<path class="radar-area" d="${buildRadarPath(scores)}" fill="url(#radarGrad)" stroke="#0891b2" stroke-width="2" stroke-linejoin="round"/>`;
   SCORE_AXES.forEach((axis,i)=>{
     const val=(scores&&scores[axis.key])||0;
-    if(scores){const r=(val/100)*RR;const{x,y}=polar(i*step,r);svg+=`<circle cx="${x}" cy="${y}" r="3" fill="#111"/>`;}
+    if(scores){const r=(val/100)*RR;const{x,y}=polar(i*step,r);svg+=`<circle cx="${x}" cy="${y}" r="3.5" fill="#0891b2"/>`;}
     const lbl=polar(i*step,LR);
     svg+=`<text x="${lbl.x}" y="${lbl.y}" text-anchor="middle" dominant-baseline="central" fill="#888" style="font-size:9px;font-weight:500">${axis.label}</text>`;
-    if(scores){svg+=`<text x="${lbl.x}" y="${lbl.y+12}" text-anchor="middle" dominant-baseline="central" fill="#111" style="font-size:10px;font-weight:700">${val}</text>`;}
+    if(scores){svg+=`<text x="${lbl.x}" y="${lbl.y+12}" text-anchor="middle" dominant-baseline="central" fill="#0e7490" style="font-size:10px;font-weight:700">${val}</text>`;}
   });
   svg+='</svg>';return svg;
 }
@@ -252,7 +265,7 @@ function getSetupLabel(){
 }
 
 window.handleSelect = function(type, id) {
-  selection[type] = selection[type]===id ? null : id;
+  selection[type] = id || null;
   showPart(type, selection[type]);
   renderUI();
 };
@@ -271,33 +284,37 @@ function renderPartSelector(type){
     fuselage:'<img src="icons/fuselage.png" class="h-7" style="mix-blend-mode:multiply" />',
     mat:'<img src="icons/mat.png" class="h-7" style="mix-blend-mode:multiply" />',
   };
+  const selPart=parts.find(p=>p.id===selection[type]);
   let html=`<div class="bg-white rounded-xl p-3 shadow-sm border border-gray-100">`;
   html+=`<div class="flex items-center gap-1.5 mb-2">${icons[type]}<h3 class="text-[10px] font-semibold text-gray-900 uppercase tracking-wider">${label}</h3></div>`;
-  html+=`<div class="flex flex-col gap-1">`;
+  html+=`<div class="relative">`;
+  html+=`<select onchange="handleSelect('${type}',this.value)" class="w-full appearance-none text-xs font-medium px-3 py-2 rounded-lg border cursor-pointer focus:outline-none focus:ring-2 focus:ring-cyan-500/30 ${selPart?'bg-cyan-700 text-white border-cyan-700':'bg-gray-50 text-gray-900 border-gray-200 hover:border-gray-300'}">`;
+  html+=`<option value="" ${!selPart?'selected':''}>Choisir…</option>`;
   parts.forEach(part=>{
-    const isSel=selection[type]===part.id,isOk=compat.includes(part.id);
-    const cls=isSel?'bg-gray-900 text-white shadow-md':isOk?'bg-gray-50 text-gray-900 hover:bg-gray-100':'bg-gray-50/60 text-gray-300 cursor-not-allowed';
-    const dotCls=isSel?'bg-white':isOk?'bg-gray-300':'bg-gray-200';
-    html+=`<button onclick="${isOk?`handleSelect('${type}','${part.id}')`:''}" ${!isOk?'disabled':''} class="part-btn flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-left ${cls}">`;
-    html+=`<span class="w-1.5 h-1.5 rounded-full flex-shrink-0 ${dotCls}"></span>`;
-    html+=`<span class="text-xs font-medium">${part.name}</span>`;
-    if(!isOk) html+=`<span class="ml-auto text-[9px] uppercase tracking-wider opacity-50">N/A</span>`;
-    html+=`</button>`;
+    const isOk=compat.includes(part.id);
+    html+=`<option value="${part.id}" ${selection[type]===part.id?'selected':''} ${!isOk?'disabled':''}>${part.name}${!isOk?' — N/A':''}</option>`;
   });
+  html+=`</select>`;
+  html+=`<svg class="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 ${selPart?'text-white/70':'text-gray-400'}" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z"/></svg>`;
   html+=`</div></div>`;return html;
 }
 
+function scoreColor(val){
+  if(val>=70) return '#0891b2';
+  if(val>=40) return '#f59e0b';
+  return '#ef4444';
+}
 function renderScoreBars(scores){
   if(!scores)return'';
-  return`<div class="space-y-1.5">${SCORE_AXES.map(axis=>`
+  return`<div class="space-y-1.5">${SCORE_AXES.map(axis=>{const v=scores[axis.key];return`
     <div class="flex items-center gap-2">
       <span class="text-[10px] text-gray-500 w-[80px] text-right truncate">${axis.label}</span>
       <div class="flex-1 h-[5px] bg-gray-100 rounded-full overflow-hidden">
-        <div class="score-bar h-full bg-gray-900 rounded-full" style="width:${scores[axis.key]}%"></div>
+        <div class="score-bar h-full rounded-full" style="width:${v}%;background:${scoreColor(v)}"></div>
       </div>
-      <span class="text-[10px] font-bold text-gray-900 w-6 text-right tabular-nums">${scores[axis.key]}</span>
+      <span class="text-[10px] font-bold w-6 text-right tabular-nums" style="color:${scoreColor(v)}">${v}</span>
     </div>
-  `).join('')}</div>`;
+  `;}).join('')}</div>`;
 }
 
 function renderUI(){
