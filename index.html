@@ -19,7 +19,6 @@
     .radar-area { transition: d 0.6s cubic-bezier(.25,.8,.25,1); }
     .score-bar { transition: width 0.5s cubic-bezier(.25,.8,.25,1); }
     .part-btn { transition: all 0.2s ease; }
-    #viewer-canvas { width:100%; height:100%; display:block; }
   </style>
 </head>
 <body class="bg-[#f2f2f2]">
@@ -30,6 +29,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
 // ═══════════════════════════════════════════
 // DATA
@@ -73,69 +73,50 @@ const TYPE_LABELS = { aile_avant:'Aile avant', stabilisateur:'Stabilisateur', fu
 const PART_TYPES = ['aile_avant','stabilisateur','fuselage','mat'];
 
 // ═══════════════════════════════════════════
-// THREE.JS SETUP
+// THREE.JS
 // ═══════════════════════════════════════════
-let scene, camera, renderer, controls;
-const loadedModels = {};   // cache: partId -> THREE.Group
-const activeModels = {};   // currently visible: partType -> THREE.Group
+let scene, camera, renderer, controls, envMap;
+const loadedModels = {};
+const activeModels = {};
 const loader = new GLTFLoader();
 
 function initThree(container) {
   scene = new THREE.Scene();
-  scene.background = new THREE.Color(0xffffff);
+  scene.background = new THREE.Color(0xf8f8f8);
 
   // Camera
-  camera = new THREE.PerspectiveCamera(35, container.clientWidth / container.clientHeight, 0.1, 10000);
-  camera.position.set(0, 300, 800);
+  camera = new THREE.PerspectiveCamera(35, container.clientWidth / container.clientHeight, 0.01, 100);
+  camera.position.set(0.4, 0.6, 1.4);
 
   // Renderer
-  renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+  renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(container.clientWidth, container.clientHeight);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.2;
+  renderer.toneMappingExposure = 1.8;
   container.appendChild(renderer.domElement);
 
-  // Controls — free rotation 3 axes
+  // Environment map for realistic reflections
+  const pmremGenerator = new THREE.PMREMGenerator(renderer);
+  envMap = pmremGenerator.fromScene(new RoomEnvironment(), 0.04).texture;
+  scene.environment = envMap;
+
+  // Controls
   controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
   controls.dampingFactor = 0.08;
   controls.enablePan = false;
-  controls.minDistance = 200;
-  controls.maxDistance = 2000;
-  controls.target.set(0, 0, 0);
+  controls.minDistance = 0.3;
+  controls.maxDistance = 4;
+  controls.target.set(0, 0.2, 0);
 
-  // Lighting
-  const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
-  scene.add(ambientLight);
-
-  const dirLight1 = new THREE.DirectionalLight(0xffffff, 1.0);
-  dirLight1.position.set(500, 800, 500);
-  scene.add(dirLight1);
-
-  const dirLight2 = new THREE.DirectionalLight(0xffffff, 0.5);
-  dirLight2.position.set(-500, 400, -300);
-  scene.add(dirLight2);
-
-  const dirLight3 = new THREE.DirectionalLight(0xffffff, 0.3);
-  dirLight3.position.set(0, -400, 500);
-  scene.add(dirLight3);
-
-  // Ground reflection hint
-  const groundGeo = new THREE.PlaneGeometry(4000, 4000);
-  const groundMat = new THREE.MeshStandardMaterial({ color: 0xf5f5f5, roughness: 0.9 });
-  const ground = new THREE.Mesh(groundGeo, groundMat);
-  ground.rotation.x = -Math.PI / 2;
-  ground.position.y = -500;
-  scene.add(ground);
-
-  // Handle resize
-  const resizeObserver = new ResizeObserver(() => {
+  // Resize
+  const ro = new ResizeObserver(() => {
     camera.aspect = container.clientWidth / container.clientHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(container.clientWidth, container.clientHeight);
   });
-  resizeObserver.observe(container);
+  ro.observe(container);
 
   animate();
 }
@@ -154,16 +135,23 @@ function loadModel(partId, filePath) {
     }
     loader.load(filePath, (gltf) => {
       const model = gltf.scene;
-      // Apply carbon material
-      const carbonMat = new THREE.MeshStandardMaterial({
-        color: 0x222222,
-        roughness: 0.4,
-        metalness: 0.6,
-      });
+      // Keep original materials from the .glb — if they have textures/stickers they'll show
+      // If not, enhance default material for carbon look
       model.traverse((child) => {
         if (child.isMesh) {
-          child.material = carbonMat;
-          child.castShadow = true;
+          // If the material is default/untextured, apply a nice carbon look
+          const mat = child.material;
+          if (!mat.map) {
+            child.material = new THREE.MeshPhysicalMaterial({
+              color: 0x1a1a1a,
+              roughness: 0.25,
+              metalness: 0.8,
+              clearcoat: 0.4,
+              clearcoatRoughness: 0.2,
+              envMap: envMap,
+              envMapIntensity: 1.5,
+            });
+          }
         }
       });
       loadedModels[partId] = model;
@@ -173,7 +161,6 @@ function loadModel(partId, filePath) {
 }
 
 async function showPart(type, partId) {
-  // Remove current model for this type
   if (activeModels[type]) {
     scene.remove(activeModels[type]);
     delete activeModels[type];
@@ -186,12 +173,7 @@ async function showPart(type, partId) {
   const model = await loadModel(part.id, part.file);
   scene.add(model);
   activeModels[type] = model;
-
-  // Auto-fit camera on first complete load
-  const activeCount = Object.keys(activeModels).length;
-  if (activeCount === 1 && !window._cameraFitted) {
-    fitCamera();
-  }
+  fitCamera();
 }
 
 function fitCamera() {
@@ -202,13 +184,11 @@ function fitCamera() {
   const center = box.getCenter(new THREE.Vector3());
   const size = box.getSize(new THREE.Vector3());
   const maxDim = Math.max(size.x, size.y, size.z);
-  const distance = maxDim / (2 * Math.tan((camera.fov * Math.PI) / 360));
+  const dist = maxDim / (2 * Math.tan((camera.fov * Math.PI) / 360));
 
   controls.target.copy(center);
-  camera.position.set(center.x, center.y + maxDim * 0.3, center.z + distance * 1.4);
-  camera.lookAt(center);
+  camera.position.set(center.x + dist * 0.5, center.y + dist * 0.4, center.z + dist * 1.2);
   controls.update();
-  window._cameraFitted = true;
 }
 
 function removeAllModels() {
@@ -216,17 +196,11 @@ function removeAllModels() {
     scene.remove(activeModels[type]);
     delete activeModels[type];
   });
-  window._cameraFitted = false;
 }
 
-// Preload all models
+// Preload all
 Object.values(PARTS).flat().forEach(part => {
-  loader.load(part.file, (gltf) => {
-    const model = gltf.scene;
-    const carbonMat = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.4, metalness: 0.6 });
-    model.traverse((child) => { if (child.isMesh) { child.material = carbonMat; child.castShadow = true; } });
-    loadedModels[part.id] = model;
-  });
+  loadModel(part.id, part.file);
 });
 
 // ═══════════════════════════════════════════
@@ -234,10 +208,7 @@ Object.values(PARTS).flat().forEach(part => {
 // ═══════════════════════════════════════════
 function findSetup(sel) {
   if (!sel.aile_avant || !sel.stabilisateur || !sel.fuselage || !sel.mat) return null;
-  return SETUPS.find(s =>
-    s.aile_avant===sel.aile_avant && s.stabilisateur===sel.stabilisateur &&
-    s.fuselage===sel.fuselage && s.mat===sel.mat
-  ) || null;
+  return SETUPS.find(s => s.aile_avant===sel.aile_avant && s.stabilisateur===sel.stabilisateur && s.fuselage===sel.fuselage && s.mat===sel.mat) || null;
 }
 
 function getCompatibleParts(partType, sel) {
@@ -248,7 +219,7 @@ function getCompatibleParts(partType, sel) {
   return [...new Set(matching.map(s => s[partType]))];
 }
 
-// ── RADAR CHART
+// ── RADAR
 const RS=300, RC=RS/2, RR=105, LR=RR+28, RINGS=[20,40,60,80,100];
 function polar(a,r){ const rad=((a-90)*Math.PI)/180; return {x:RC+r*Math.cos(rad),y:RC+r*Math.sin(rad)}; }
 function buildRadarPath(scores){
@@ -281,9 +252,8 @@ function getSetupLabel(){
 }
 
 window.handleSelect = function(type, id) {
-  const newId = selection[type]===id ? null : id;
-  selection[type] = newId;
-  showPart(type, newId);
+  selection[type] = selection[type]===id ? null : id;
+  showPart(type, selection[type]);
   renderUI();
 };
 
@@ -337,23 +307,21 @@ function renderUI(){
   const isIncompat=isComplete&&!setup;
   const label=getSetupLabel();
 
-  // Header
   document.getElementById('header').innerHTML = `
     <div class="flex items-center justify-between">
-      <div>
-        <p class="text-[10px] uppercase tracking-[0.15em] text-gray-400 font-medium">Configurateur</p>
-        <h1 class="text-xl font-bold text-gray-900">Foil Complet</h1>
+      <div class="flex items-center gap-3">
+        <img src="logo.svg" alt="AFS" class="h-7" />
+        <div>
+          <p class="text-[10px] uppercase tracking-[0.15em] text-gray-400 font-medium">Configurateur</p>
+          <h1 class="text-xl font-bold text-gray-900">Foil Complet</h1>
+        </div>
       </div>
       ${selCount>0?`<button onclick="handleReset()" class="text-[10px] uppercase tracking-wider text-gray-400 hover:text-gray-600 font-medium">Réinitialiser</button>`:''}
     </div>`;
 
-  // Watermark
   document.getElementById('watermark').textContent = label || 'Build Your Foil';
 
-  // Right panel
   let rhtml = '';
-
-  // Radar
   rhtml+=`<div class="bg-white rounded-xl shadow-sm border border-gray-100 p-4 flex-shrink-0">
     <div class="relative">
       ${renderRadarSVG(setup?setup.scores:null)}
@@ -366,7 +334,6 @@ function renderUI(){
     ${renderScoreBars(setup?setup.scores:null)}
   </div>`;
 
-  // Selectors
   rhtml+=`<div class="grid grid-cols-2 gap-3 flex-shrink-0">`;
   PART_TYPES.forEach(type=>{rhtml+=renderPartSelector(type);});
   rhtml+=`</div>`;
@@ -382,35 +349,26 @@ function renderUI(){
 }
 
 // ═══════════════════════════════════════════
-// INITIAL RENDER — shell layout (rendered once)
+// LAYOUT
 // ═══════════════════════════════════════════
 document.getElementById('app').innerHTML = `
-  <!-- Header -->
   <div id="header" class="flex-shrink-0 px-5 pt-4 pb-2"></div>
-
-  <!-- Main content -->
   <div class="flex-1 min-h-0 flex gap-4 px-5 pb-4">
-    <!-- LEFT: 3D Viewer -->
     <div class="flex-1 min-w-0 bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden relative">
       <div id="viewer-container" class="w-full h-full"></div>
-      <!-- Watermark overlay -->
       <span id="watermark" class="absolute inset-0 flex items-center justify-center pointer-events-none z-10"
             style="color:rgba(0,0,0,0.025);font-size:clamp(1.5rem,5vw,4rem);font-weight:900;letter-spacing:-0.02em;font-style:italic;white-space:nowrap">
         Build Your Foil
       </span>
-      <!-- 3D hint -->
       <div class="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1.5 text-[10px] text-gray-400 bg-white/60 backdrop-blur-sm px-2.5 py-0.5 rounded-full pointer-events-none">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="opacity-50"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
         Rotation libre 3D
       </div>
     </div>
-
-    <!-- RIGHT: Radar + Selectors -->
     <div id="right-panel" class="w-[340px] flex-shrink-0 flex flex-col gap-3 min-h-0 overflow-auto"></div>
   </div>
 `;
 
-// Init Three.js and UI
 initThree(document.getElementById('viewer-container'));
 renderUI();
 </script>
