@@ -302,6 +302,8 @@ window.handleSelect = function(type, id) {
 
 window.handleSelectB = function(type, id) {
   selectionB[type] = id || null;
+  viewerShowing = 'B';
+  showSelectionInViewer(selectionB);
   renderUI();
 };
 
